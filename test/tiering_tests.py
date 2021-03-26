@@ -440,6 +440,8 @@ class Test_tiering_config_env(Helper):
             "MEMKIND_MEM_TIERING_CONFIG=DRAM:1,FS_DAX:/tmp/:100M:4," +
             self.default_policy, log_level="2", validate_retcode=False)
         M = 1024 * 1024
+        for msg in output:
+            print(msg)
 
         assert self.log_debug_prefix + "kind_name: " + \
             self.kind_name_dict.get('DRAM') in output, "Wrong message"
