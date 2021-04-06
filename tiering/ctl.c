@@ -2,6 +2,7 @@
 /* Copyright (C) 2021 Intel Corporation. */
 
 #include <memkind_memtier.h>
+#include <memtier/internal/memtier_private.h>
 #include <tiering/memtier_log.h>
 
 #include <errno.h>
@@ -15,9 +16,10 @@
 #define CTL_VALUE_SEPARATOR        ":"
 #define CTL_STRING_QUERY_SEPARATOR ","
 
-// TODO: Lift this limitation
-#define MAX_TIERS 64
-static struct memtier_tier *tiers[MAX_TIERS] = {NULL};
+typedef struct tier_registry {
+    unsigned size;
+    struct memtier_tier **tiers;
+} tier_registry;
 
 // TODO: Create tiers registry
 typedef struct fs_dax_registry {
@@ -25,7 +27,21 @@ typedef struct fs_dax_registry {
     memkind_t *kinds;
 } fs_dax_registry;
 
+static struct tier_registry tier_reg_g = {0, NULL};
 static struct fs_dax_registry fs_dax_reg_g = {0, NULL};
+
+static int ctl_init_tier_reg(unsigned size)
+{
+    tier_reg_g.tiers =
+        memkind_calloc(MEMKIND_DEFAULT, size, sizeof(struct memtier_tier));
+    if (!tier_reg_g.tiers) {
+        log_err("Tiers allocation failure");
+        return -1;
+    }
+    tier_reg_g.size = size;
+
+    return 0;
+}
 
 static int ctl_add_pmem_kind_to_fs_dax_reg(memkind_t kind)
 {
@@ -257,9 +273,8 @@ static const char *ctl_policy_to_str(memtier_policy_t policy)
 static void ctl_destroy_tiers(void)
 {
     unsigned i;
-    for (i = 0; i < MAX_TIERS; ++i) {
-        if (tiers[i])
-            memtier_tier_delete(tiers[i]);
+    for (i = 0; i < tier_reg_g.size; ++i) {
+        memtier_tier_delete(tier_reg_g.tiers[i]);
     }
 }
 
@@ -273,12 +288,19 @@ struct memtier_kind *ctl_create_tier_kind_from_env(char *env_var_string)
     char *sptr = NULL;
     char *qbuf = env_var_string;
 
-    unsigned query_count = 1;
+    size_t query_count = 1;
     while (*qbuf)
         if (*qbuf++ == *CTL_STRING_QUERY_SEPARATOR)
             ++query_count;
 
-    unsigned tier_count = query_count - 1;
+    if (query_count - 1 > UINT_MAX) {
+        log_err("Too much memory tiers %u", query_count - 1);
+        return NULL;
+    }
+    ret = ctl_init_tier_reg(query_count - 1);
+    if (ret != 0) {
+        return NULL;
+    }
 
     qbuf = strtok_r(env_var_string, CTL_STRING_QUERY_SEPARATOR, &sptr);
     if (qbuf == NULL) {
@@ -292,17 +314,12 @@ struct memtier_kind *ctl_create_tier_kind_from_env(char *env_var_string)
         return NULL;
     }
 
-    if (tier_count > MAX_TIERS) {
-        log_err("Too much memory tiers %u", tier_count);
-        return NULL;
-    }
-
     struct memtier_builder *builder = memtier_builder_new();
     if (!builder) {
         return NULL;
     }
 
-    for (i = 0; i < tier_count; ++i) {
+    for (i = 0; i < tier_reg_g.size; ++i) {
         memkind_t kind = NULL;
         unsigned ratio = 0;
 
@@ -317,12 +334,12 @@ struct memtier_kind *ctl_create_tier_kind_from_env(char *env_var_string)
 
         qbuf = strtok_r(NULL, CTL_STRING_QUERY_SEPARATOR, &sptr);
 
-        tiers[i] = memtier_tier_new(kind);
-        if (tiers[i] == NULL) {
+        tier_reg_g.tiers[i] = memtier_tier_new(kind);
+        if (tier_reg_g.tiers[i] == NULL) {
             goto builder_delete;
         }
 
-        ret = memtier_builder_add_tier(builder, tiers[i], ratio);
+        ret = memtier_builder_add_tier(builder, tier_reg_g.tiers[i], ratio);
         if (ret != 0) {
             goto builder_delete;
         }

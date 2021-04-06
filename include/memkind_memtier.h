@@ -17,7 +17,6 @@ extern "C" {
  */
 
 /// \brief Forward declaration
-struct memtier_tier;
 struct memtier_builder;
 struct memtier_kind;
 

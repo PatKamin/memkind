@@ -377,8 +377,8 @@ class Test_tiering_config_env(Helper):
         output = self.get_ld_preload_cmd_output(
             "MEMKIND_MEM_TIERING_CONFIG=2", validate_retcode=False)
 
-        assert output[0] == self.log_error_prefix + \
-            "Too low number of queries in configuration string: 2", \
+        assert self.log_error_prefix + \
+            "Tiers allocation failure" in output, \
             "Wrong message"
 
     def test_bad_ratio(self):
@@ -446,8 +446,9 @@ class Test_tiering_config_env(Helper):
         output = self.get_ld_preload_cmd_output(
             "MEMKIND_MEM_TIERING_CONFIG=" + config_str, validate_retcode=False)
 
-        assert output[0] == self.log_error_prefix + \
-            "No valid query found in: " + config_str, "Wrong message"
+        assert self.log_error_prefix + \
+            "Error with parsing MEMKIND_MEM_TIERING_CONFIG" in output, \
+            "Wrong message"
 
     @pytest.mark.parametrize("query_str", [":", ":::"])
     def test_negative_query_str_invalid(self, query_str):
